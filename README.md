@@ -14,12 +14,12 @@ pip install selenium webdriver-manager requests
 pip install openai-whisper
 
 # For OpenAI API method:
-pip install openai
-Usage:
-Option 1: Local Whisper (Free, no API key needed):
-bashpython transcribe.py --url <url here> --method whisper-local
-Option 2: OpenAI API (Paid, more accurate):
-bashpython transcribe.py --url <url here> --method openai-api --api-key YOUR_API_KEY
+pip install openai n<br>
+Usage:<br>
+Option 1: Local Whisper (Free, no API key needed):<br>
+bashpython transcribe.py --url <url here> --method whisper-local<br>
+Option 2: OpenAI API (Paid, more accurate):<br>
+bashpython transcribe.py --url <url here> --method openai-api --api-key YOUR_API_KEY<br>
 How it works:
 
 Opens browser and checks login status
