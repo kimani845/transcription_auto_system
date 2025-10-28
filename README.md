@@ -10,7 +10,7 @@ Installation:
 bash# Install required packages
 pip install selenium webdriver-manager requests
 
-# For local Whisper (recommended - free):
+`# For local Whisper (recommended - free):`
 pip install openai-whisper
 
 # For OpenAI API method:
