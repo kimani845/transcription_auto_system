@@ -17,9 +17,9 @@ pip install openai-whisper
 pip install openai
 Usage:
 Option 1: Local Whisper (Free, no API key needed):
-bashpython transcribe.py --url https://wajir-kenya254.web.app/transcribe --method whisper-local
+bashpython transcribe.py --url <url here> --method whisper-local
 Option 2: OpenAI API (Paid, more accurate):
-bashpython transcribe.py --url https://wajir-kenya254.web.app/transcribe --method openai-api --api-key YOUR_API_KEY
+bashpython transcribe.py --url <url here> --method openai-api --api-key YOUR_API_KEY
 How it works:
 
 Opens browser and checks login status
