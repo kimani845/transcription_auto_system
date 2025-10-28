@@ -1,4 +1,4 @@
-Perfect! I've created a comprehensive script for you. Here's what it does:
+I've created a comprehensive script for transcription automation. Here's the functionalities:
 Features:
 ✅ Login Detection - Checks if you're logged in, waits for you if not
 ✅ Dual Transcription Support - Choose between local Whisper or OpenAI API
