@@ -1,3 +1,4 @@
+
 #!/usr/bin/env python3
 """
 Optimized Gemini Audio Transcription Script for Digital Umuganda
@@ -27,28 +28,41 @@ load_dotenv()
 
 class GeminiTranscription:
     def __init__(self, url, gemini_api_key):
-        """Initialize Gemini transcription automation"""
+        """Initialize Gemini transcription automation with model rotation"""
         self.url = url
         self.gemini_api_key = gemini_api_key
         self.driver = None
         self.audio_count = 0
+        
+        # List of models to rotate through (ordered by preference)
+        self.model_names = [
+            'models/gemini-2.0-flash-lite',      # Best: 30 RPM, 1M TPM
+            'models/gemini-2.0-flash',           # Good: 15 RPM, 1M TPM
+            'models/gemini-2.5-flash-lite',      # Good: 15 RPM, 250K TPM
+            'models/gemini-2.5-flash',           # Good: 10 RPM, 250K TPM
+            'models/gemini-2.0-flash-exp',       # Fallback: 10 RPM, 250K TPM
+        ]
+        
+        self.current_model_index = 0
+        self.model_retry_count = {}
         
         # Initialize Gemini
         try:
             import google.generativeai as genai
             genai.configure(api_key=gemini_api_key)
             
-            # Use the latest native audio model
+            # Initialize with first model
+            self.current_model_name = self.model_names[self.current_model_index]
             self.gemini_model = genai.GenerativeModel(
-                'models/gemini-2.0-flash-exp',
+                self.current_model_name,
                 generation_config=genai.GenerationConfig(
-                    temperature=0.1,  # Low temperature for accuracy
+                    temperature=0.1,
                     top_p=0.95,
                     top_k=40,
                     max_output_tokens=8192,
                 )
             )
-            print("✓ Gemini 2.5 Flash Native Audio initialized!")
+            print(f"✓ Initialized with model: {self.current_model_name}")
             
         except ImportError:
             print("ERROR: Install google-generativeai: pip install google-generativeai")
@@ -56,6 +70,32 @@ class GeminiTranscription:
         except Exception as e:
             print(f"ERROR initializing Gemini: {e}")
             sys.exit(1)
+    
+    def switch_to_next_model(self):
+        """Switch to the next available model when rate limit is hit"""
+        import google.generativeai as genai
+        
+        self.current_model_index = (self.current_model_index + 1) % len(self.model_names)
+        self.current_model_name = self.model_names[self.current_model_index]
+        
+        print(f"\n⚠️  Rate limit reached, switching to: {self.current_model_name}")
+        
+        self.gemini_model = genai.GenerativeModel(
+            self.current_model_name,
+            generation_config=genai.GenerationConfig(
+                temperature=0.1,
+                top_p=0.95,
+                top_k=40,
+                max_output_tokens=8192,
+            )
+        )
+        
+        # Track retry count for this model
+        if self.current_model_name not in self.model_retry_count:
+            self.model_retry_count[self.current_model_name] = 0
+        self.model_retry_count[self.current_model_name] += 1
+        
+        return True
     
     def setup_driver(self):
         """Setup Chrome WebDriver"""
@@ -166,34 +206,18 @@ class GeminiTranscription:
             print(f"❌ Download failed: {e}")
             return None
     
-    def transcribe_audio(self, audio_file):
-        """Transcribe audio using Gemini with optimized prompt"""
-        if os.path.getsize(audio_file) > 15 * 1024 * 1024:
-            print("⚠️ Large audio, compressing before upload...")
-            import subprocess
-            compressed = tempfile.NamedTemporaryFile(delete=False, suffix=".mp3").name
-            subprocess.run(["ffmpeg", "-i", audio_file, "-b:a", "96k", compressed, "-y"], check=True)
-            audio_file = compressed
-            
+    def transcribe_audio(self, audio_file, retry_count=0):
+        """Transcribe audio using Gemini with automatic model rotation on rate limit"""
+        max_retries = len(self.model_names)  # Try all models once
+        
         try:
-            print("Uploading to Gemini...")
+            print(f"Uploading to Gemini ({self.current_model_name})...")
             
             import google.generativeai as genai
-            from google.api_core import exceptions
             
             # Upload file
-            # audio_file_obj = genai.upload_file(audio_file)
-            # print(f"✓ Uploaded: {audio_file_obj.name}")
-            for attempt in range(3):
-                try:
-                    audio_file_obj = genai.upload_file(audio_file)
-                    print(f"✓ Uploaded: {audio_file_obj.name}")
-                    break
-                except exceptions.ResourceExhausted as e:
-                    print(f"⚠️  Upload attempt {attempt + 1} failed: {e}")
-                    if attempt == 2:
-                        raise
-                    time.sleep(5)
+            audio_file_obj = genai.upload_file(audio_file)
+            print(f"✓ Uploaded: {audio_file_obj.name}")
             
             # Wait for processing
             print("Processing audio...")
@@ -207,31 +231,59 @@ class GeminiTranscription:
             
             print("✓ Audio processed")
             
-            # Optimized prompt for accurate Swahili transcription
-            prompt = """Transcribe this Swahili audio with MAXIMUM ACCURACY.
+            # HIGHLY OPTIMIZED PROMPT for Swahili transcription
+            prompt = """You are a professional Swahili transcriptionist. Listen carefully to this audio and transcribe it with PERFECT ACCURACY.
 
-CRITICAL RULES:
-1. Transcribe ONLY what you hear - do NOT add, invent, or hallucinate words
-2. If you're unsure about a word, transcribe your best guess but stay faithful to the audio
-3. Do NOT add phrases like "thank you", "subscribe", or other common filler
-4. Do NOT add music notes, [Music], or sound descriptions
-5. Do NOT translate - keep everything in Swahili
-6. Do NOT add introductions like "Here is the transcription:"
-7. Maintain natural Swahili grammar and spelling
+CRITICAL INSTRUCTIONS - FOLLOW EXACTLY:
 
-OUTPUT FORMAT:
-Provide ONLY the raw transcription text. Nothing else.
+1. LANGUAGE: The audio is in SWAHILI. Transcribe everything in correct Swahili spelling and grammar.
 
-Transcribe now:"""
+2. ACCURACY RULES:
+   - Transcribe ONLY what you actually hear - DO NOT INVENT or GUESS words
+   - If unsure about a word, write your best attempt but NEVER add words that weren't spoken
+   - Listen carefully to every word - accuracy is more important than speed
+   - Pay attention to Swahili word patterns: mwanamke, mtoto, mwanaume, watu, etc.
+
+3. FORBIDDEN ADDITIONS (DO NOT ADD):
+   - No "Thank you", "Subscribe", "Like", or English filler phrases
+   - No [Music], [Applause], ♪ or sound effect descriptions
+   - No "Here is the transcription:" or introductory text
+   - No translations or explanations
+   - No timestamps or speaker labels
+
+4. COMMON SWAHILI WORDS TO RECOGNIZE:
+   - People: mwanamke (woman), mwanaume (man), mtoto (child), watu (people)
+   - Actions: analia (crying), amebeba (carrying), amesimama (standing), anakimbia (running)
+   - Places: juu (up/above), chini (down/below), mbele (front), nyuma (behind)
+   - Things: koti (coat), nguo (clothes), mti (tree), gari (car)
+   - Colors: nyekundu (red), nyeupe (white), nyeusi (black), kijani (green)
+
+5. GRAMMAR:
+   - Swahili uses prefixes: m-, wa-, a-, wa-, ku-, etc.
+   - Maintain proper Swahili sentence structure
+   - Use correct verb conjugations
+
+6. OUTPUT FORMAT:
+   - Provide ONLY the raw transcription
+   - No bullet points, no formatting, no numbering
+   - Just clean Swahili text with proper spacing
+
+Listen to the audio now and transcribe it perfectly in Swahili:"""
             
-            # Generate transcription
+            # Generate transcription with optimal settings
             print("Generating transcription...")
             response = self.gemini_model.generate_content(
                 [prompt, audio_file_obj],
+                generation_config=genai.GenerationConfig(
+                    temperature=0.05,  # Very low for maximum accuracy
+                    top_p=0.9,
+                    top_k=20,
+                    max_output_tokens=8192,
+                ),
                 request_options={"timeout": 120}
             )
             
-            # Cleanup
+            # Cleanup uploaded file
             try:
                 genai.delete_file(audio_file_obj.name)
                 print("✓ Cleaned up file")
@@ -246,15 +298,22 @@ Transcribe now:"""
                 "Transcription:",
                 "**Transcription:**",
                 "The transcription is:",
-                "[Music]",
-                "[Applause]",
-                "♪",
+                "Here you go:",
+                "[Music]", "[music]",
+                "[Applause]", "[applause]",
+                "♪", "♫", "♬",
                 "Thank you for watching",
+                "Thanks for watching",
                 "Please subscribe",
+                "Like and subscribe",
+                "Don't forget to",
             ]
             
             for artifact in artifacts:
                 transcription = transcription.replace(artifact, "")
+            
+            # Remove markdown formatting that Gemini sometimes adds
+            transcription = transcription.replace("**", "").replace("*", "")
             
             # Clean up extra whitespace and newlines
             transcription = " ".join(transcription.split())
@@ -263,9 +322,30 @@ Transcribe now:"""
             return transcription
             
         except Exception as e:
-            print(f"❌ Transcription failed: {e}")
-            traceback.print_exc()
-            return None
+            error_message = str(e).lower()
+            
+            # Check if it's a rate limit error
+            if 'rate limit' in error_message or '429' in error_message or 'quota' in error_message or 'resource_exhausted' in error_message:
+                print(f"⚠️  Rate limit hit on {self.current_model_name}")
+                
+                if retry_count < max_retries:
+                    # Switch to next model and retry
+                    self.switch_to_next_model()
+                    print(f"🔄 Retrying with new model (attempt {retry_count + 1}/{max_retries})...")
+                    time.sleep(3)  # Brief pause before retry
+                    return self.transcribe_audio(audio_file, retry_count + 1)
+                else:
+                    print(f"❌ All models exhausted. Rate limits reached on all {max_retries} models.")
+                    print("⏰ Waiting 60 seconds before continuing...")
+                    time.sleep(60)
+                    # Reset to first model and try again
+                    self.current_model_index = 0
+                    self.switch_to_next_model()
+                    return self.transcribe_audio(audio_file, 0)
+            else:
+                print(f"❌ Transcription failed: {e}")
+                traceback.print_exc()
+                return None
     
     def detect_code_switching(self, text):
         """Mark English/Sheng words with [cs]"""
@@ -423,10 +503,15 @@ Transcribe now:"""
                 pass
     
     def run(self):
-        """Main loop"""
+        """Main loop with model rotation status"""
         try:
             print("\n" + "="*60)
-            print("🚀 GEMINI TRANSCRIPTION AUTOMATION")
+            print("🚀 GEMINI MULTI-MODEL TRANSCRIPTION")
+            print("="*60)
+            print(f"📋 Available models: {len(self.model_names)}")
+            for i, model in enumerate(self.model_names):
+                marker = "→" if i == self.current_model_index else " "
+                print(f"  {marker} {model}")
             print("="*60)
             
             self.setup_driver()
@@ -462,7 +547,12 @@ Transcribe now:"""
                     time.sleep(3)
             
             print(f"\n{'='*60}")
-            print(f"✅ COMPLETE - {self.audio_count} audios processed")
+            print(f"✅ SESSION COMPLETE")
+            print(f"📊 Total audios processed: {self.audio_count}")
+            print(f"📈 Model usage stats:")
+            for model, count in self.model_retry_count.items():
+                if count > 0:
+                    print(f"   • {model.split('/')[-1]}: switched {count} time(s)")
             print(f"{'='*60}\n")
             
         finally:
